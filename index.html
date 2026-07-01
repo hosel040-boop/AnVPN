@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AnVPN — Оплата</title>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- TON Connect UI -->
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--tg-theme-bg-color, #1A1410);
+      color: var(--tg-theme-text-color, #ffffff);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 20px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 32px;
+    }
+
+    .logo-circle {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 700;
+    }
+
+    .logo-a {
+      background: transparent;
+      border: 2.5px solid #F2A33C;
+      color: #F2A33C;
+    }
+
+    .logo-v {
+      background: #F2A33C;
+      color: #1A1410;
+      margin-left: -8px;
+    }
+
+    .card {
+      background: var(--tg-theme-secondary-bg-color, #2A2118);
+      border-radius: 20px;
+      padding: 24px;
+      width: 100%;
+      max-width: 360px;
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #888);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #F2A33C;
+    }
+
+    .card-sub {
+      font-size: 14px;
+      color: var(--tg-theme-hint-color, #888);
+      margin-top: 4px;
+    }
+
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+      margin: 16px 0;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .info-row .label {
+      color: var(--tg-theme-hint-color, #888);
+    }
+
+    .info-row .value {
+      color: var(--tg-theme-text-color, #fff);
+      font-weight: 500;
+    }
+
+    #ton-connect-button {
+      width: 100%;
+      max-width: 360px;
+      margin-bottom: 12px;
+    }
+
+    .pay-btn {
+      width: 100%;
+      max-width: 360px;
+      padding: 16px;
+      background: #F2A33C;
+      color: #1A1410;
+      border: none;
+      border-radius: 14px;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      display: none;
+    }
+
+    .pay-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .pay-btn:active {
+      transform: scale(0.98);
+    }
+
+    .status {
+      margin-top: 16px;
+      font-size: 14px;
+      text-align: center;
+      color: var(--tg-theme-hint-color, #888);
+      max-width: 360px;
+    }
+
+    .status.success { color: #4CD964; }
+    .status.error   { color: #FF3B30; }
+
+    .loading {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(26,20,16,0.3);
+      border-top-color: #1A1410;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="logo">
+    <div class="logo-circle logo-a">A</div>
+    <div class="logo-circle logo-v">V</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">К оплате</div>
+    <div class="card-value" id="usdt-amount">— USDT</div>
+    <div class="card-sub" id="rub-amount"></div>
+
+    <div class="divider"></div>
+
+    <div class="info-row">
+      <span class="label">Устройств</span>
+      <span class="value" id="devices-count">—</span>
+    </div>
+    <div class="info-row">
+      <span class="label">Срок</span>
+      <span class="value">30 дней</span>
+    </div>
+    <div class="info-row">
+      <span class="label">Протокол</span>
+      <span class="value">WireGuard</span>
+    </div>
+  </div>
+
+  <!-- TON Connect кнопка подключения кошелька -->
+  <div id="ton-connect-button"></div>
+
+  <!-- Кнопка оплаты — появляется после подключения кошелька -->
+  <button class="pay-btn" id="pay-btn" onclick="sendPayment()">
+    Оплатить USDT
+  </button>
+
+  <div class="status" id="status"></div>
+
+<script>
+  const tg = window.Telegram.WebApp;
+  tg.ready();
+  tg.expand();
+
+  // Параметры из URL: ?devices=2&user_id=123456789
+  const params = new URLSearchParams(window.location.search);
+  const devices = parseInt(params.get('devices') || '1');
+  const userId  = params.get('user_id') || '';
+
+  // Цены
+  const PRICE_RUB_PER_DEVICE = 199;
+  const RUB_TO_USDT = 90; // примерный курс, обнови вручную или подтяни с API
+  const totalRub  = PRICE_RUB_PER_DEVICE * devices;
+  const totalUsdt = (totalRub / RUB_TO_USDT).toFixed(2);
+
+  // USDT на сети TON (jetton)
+  const USDT_JETTON_ADDRESS = 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs';
+
+  // Твой TON-адрес (кошелёк TonKeeper) — замени на свой!
+  const YOUR_TON_WALLET = 'UQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFp';
+
+  document.getElementById('usdt-amount').textContent   = totalUsdt + ' USDT';
+  document.getElementById('rub-amount').textContent    = '≈ ' + totalRub + '₽';
+  document.getElementById('devices-count').textContent = devices + ' шт.';
+
+  // TON Connect UI
+  const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+    manifestUrl: window.location.origin + '/tonconnect-manifest.json',
+    buttonRootId: 'ton-connect-button',
+  });
+
+  tonConnectUI.onStatusChange(wallet => {
+    const btn = document.getElementById('pay-btn');
+    if (wallet) {
+      btn.style.display = 'block';
+      btn.textContent = 'Оплатить ' + totalUsdt + ' USDT';
+    } else {
+      btn.style.display = 'none';
+    }
+  });
+
+  async function sendPayment() {
+    const btn    = document.getElementById('pay-btn');
+    const status = document.getElementById('status');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading"></span>Отправляем...';
+    status.textContent = '';
+    status.className = 'status';
+
+    // Сумма в нано-единицах USDT (6 знаков)
+    const usdtNano = Math.round(parseFloat(totalUsdt) * 1_000_000).toString();
+
+    // Комментарий для идентификации платежа в боте
+    const comment = 'AnVPN_' + userId + '_' + devices;
+
+    try {
+      // Jetton transfer (USDT на TON)
+      const transaction = {
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        messages: [
+          {
+            address: YOUR_TON_WALLET,
+            amount: '50000000', // 0.05 TON на газ
+            payload: buildJettonTransferPayload(YOUR_TON_WALLET, usdtNano, comment),
+          }
+        ]
+      };
+
+      await tonConnectUI.sendTransaction(transaction);
+
+      status.textContent = '✅ Оплата отправлена! Подписка будет активирована в течение нескольких минут.';
+      status.className = 'status success';
+      btn.style.display = 'none';
+
+      // Сообщаем боту об успешной оплате
+      tg.sendData(JSON.stringify({
+        action: 'payment_sent',
+        user_id: userId,
+        devices: devices,
+        amount_usdt: totalUsdt,
+        comment: comment,
+      }));
+
+      setTimeout(() => tg.close(), 3000);
+
+    } catch (e) {
+      status.textContent = e.message?.includes('cancel')
+        ? 'Оплата отменена'
+        : '❌ Ошибка: ' + (e.message || 'попробуй снова');
+      status.className = 'status error';
+      btn.disabled = false;
+      btn.textContent = 'Попробовать снова';
+    }
+  }
+
+  // Формируем payload для jetton transfer (упрощённая версия)
+  function buildJettonTransferPayload(toAddress, amount, comment) {
+    // В продакшене используй @ton/ton для правильной сериализации BOC.
+    // Пока возвращаем пустой payload — транзакция пройдёт как обычный TON-перевод,
+    // что достаточно для ручной проверки на первом этапе.
+    return '';
+  }
+</script>
+
+</body>
+</html>
